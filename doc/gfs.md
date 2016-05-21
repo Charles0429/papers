@@ -7,6 +7,7 @@
 - System Interactions
 - Master Operation
 - Fault Tolerance and Diagnose
+- Discussion
 
 # 2. Design Motivation
 
@@ -94,8 +95,6 @@ GFS master存储三种metadata，包括文件和chunk namespace，文件到chunk
 
 GFS master不持久化存储chunk位置信息的原因是，GFS chunkserver很容易出现宕机，重启等行为，这样GFS master在每次发生这些事件的时候，都要修改持久化存储里面的位置信息的数据。
 
-问题：如果一台chunkserver宕机了，它的chunk位置信息何时会被GFS master删除？
-
 ### 3.4.3 operation log
 
 **operation log的作用**
@@ -149,7 +148,7 @@ Lease的过期时间默认是60s，可以通过心跳信息来续时间，如果
 
 不断重复上述流程，直到所有的chunkserver都收到client的所有数据。
 
-以上述方式来传送B字节数据到R个副本，并假设网络吞吐量为T，机器之间的时延为R，那么，整个数据的传输时间为B/T+RL。
+以上述方式来传送B字节数据到R个副本，并假设网络吞吐量为T，机器之间的时延为L，那么，整个数据的传输时间为B/T+RL。
 
 ## 4.3 Atomic Record Appends
 
@@ -160,7 +159,7 @@ Append操作流程和写差不多，主要区别在一下方面
 
 这里需要讨论的是，如果append操作在部分副本失败的情况下，会发生什么？
 
-例如，写操作要追加到S1-S3，但是，仅仅是S1,S2成功了，S3失败了，GFS client会重试操作，假如第二次成功了，那么S1,S2写了两次，S3写了一次，感觉这里会有问题，需要讨论。
+例如，写操作要追加到S1-S3，但是，仅仅是S1,S2成功了，S3失败了，GFS client会重试操作，假如第二次成功了，那么S1,S2写了两次，S3写了一次，目前，暂时认为GFS会先把失败的记录进行padding对齐到primary的记录，然后再继续append。
 
 ## 4.4 Snapshot
 
@@ -189,14 +188,14 @@ GFS中consistent、defined的定义如下：
 下面分析表格中出现的几种情况。
 
 1. Write(Serial Success)，单个写操作，并且返回成功，那么所有副本都写入了这次操作的数据，因此所有客户端都能看到这次写入的数据，所以，是defined。
-2. Write(Concurrent Successes)，多个写操作，并且返回成功，由于多个客户端写请求发送给priamary后，由primary来决定写的操作顺序，所以，最后一个写请求的数据反应了最后的数据请求，因此，对于客户端来讲，大家读到的数据都是一样的，但不确定是哪次写入的数据，所以是consistent but undefined。这个不确定，GFS说的是mingled fragments，但是写的操作顺序是控制了的啊。
+2. Write(Concurrent Successes)，多个写操作，并且返回成功，由于多个客户端写请求发送给priamary后，由primary来决定写的操作顺序，但是，有可能多个写操作可能是有区域重叠的，这样，最终写完成的数据可能是多个写操作数据叠加在一起，所以这种情况是consistent和undefined。
 3. Write(Failure)，写操作失败，则可能有的副本写入了数据，有的没有，所以是inconsistent。
 4. Record Append(Serial Success and Concurrent Success)，由于Record Append可能包含重复数据，因此，是inconsistent，由于整个写入的数据都能看到，所以是defined。
 5. Record Append(Failure)，可能部分副本append成功，部分副本append失败，所以，结果是inconsistent。
 
 GFS用version来标记一个chunkserver挂掉的期间，是否有client进行了write或者append操作。每进行一次write或者append，version会增加。
 
-需要考虑的点是client会缓存chunk的位置信息，有可能其中某些chunkserver已经挂掉又起来了，这个时候chunkserver的数据可能是老的数据，读到的数据是会不一致的。读流程中，好像没有看到要带version信息来读的。这个论文中没看到避免的措施。
+需要考虑的点是client会缓存chunk的位置信息，有可能其中某些chunkserver已经挂掉又起来了，这个时候chunkserver的数据可能是老的数据，读到的数据是会不一致的。读流程中，好像没有看到要带version信息来读的。这个论文中没看到避免的措施，目前还没有结果。
 
 ###4.5.1 Implications for Applications
 
@@ -285,8 +284,8 @@ GFS master会把落后的chunk当垃圾来清理掉，并且不会把落后的ch
 
 这里有两个疑问：
 
-1. master分配的lease的有效期是60s，如果在lease期间，chunkserver挂掉了，那么这个时候chunkserver的version number是最新的，但是lease期间的部分数据没有更新到该chunkserver，论文中没有讨论这种情况如何处理？
-2. GFS master把落后的chunk当作垃圾清理，那么，是否是走re-replication的逻辑来生成新的副本呢？
+1. master分配的lease的有效期是60s，如果在lease期间，chunkserver挂掉了，那么这个时候chunkserver的version number是最新的，但是lease期间的部分数据没有更新到该chunkserver，论文中没有讨论这种情况如何处理？写入操作可能是失败了，但是version number是最新的，这样它重启的时候就无法区分是不是stale replication？
+2. GFS master把落后的chunk当作垃圾清理，那么，是否是走re-replication的逻辑来生成新的副本呢？没有，是走立即复制的逻辑。
 
 #6. Fault Tolerance and Diagnose
 
@@ -319,3 +318,134 @@ master的operation log和checkpoint都会复制到多台机器上，要保证这
 ## 6.3 Diagnose Tools
 
 主要是通过log，包括重要事件的log(chunkserver上下线)，RPC请求，RPC响应等。
+
+# 7. Discussion
+
+本部分主要讨论大规模分布式系统一书上，列出的关于gfs的一些问题，具体如下。
+
+## 7.1 为什么存储三个副本？而不是两个或者四个？
+
+-  如果存储的是两个副本，挂掉一个副本后，系统的可用性会比较低，例如，如果另一个没有挂掉的副本出现网络问题等，整个系统就不可用了
+- 如果存储的是四个副本，成本比较高
+
+## 7.2 chunk的大小为何选择64MB？这个选择主要基于哪些考虑？
+
+**优点**
+
+- 可以减少GFS client和GFS master的交互次数，chunk size比较大的时候，多次读可能是一块chunk的数据，这样，可以减少GFS client向GFS master请求chunk位置信息的请求次数。
+- 对于同一个chunk，GFS client可以和GFS chunkserver之间保持持久连接，提升读的性能。
+- chunk size越大，chunk的metadata的总大小就越小，使得chunk相关的metadata可以存储在GFS master的内存中。
+
+**缺点**
+
+- chunk size越大时，可能对部分文件来讲只有1个chunk，那么这个时候对该文件的读写就会落到一个GFS chunkserver上，成为热点。
+
+64MB应该是google得出的一个比较好的权衡优缺点的经验值。
+
+## 7.3 gfs主要支持追加，改写操作比较少，为什么这么设计？如何设计一个仅支持追加操作的文件系统来构建分布式表格系统bigtable？
+
+- 因为追加多，改写少是google根据现有应用需求而确定的
+- bigtable的问题等读到bigtable论文再讨论
+
+## 7.4 为什么要将数据流和控制流分开？如果不分开，如何实现追加流程？
+
+主要是为了更有效地利用网络带宽。把数据流分开，可以更好地优化数据流的网络带宽使用。
+
+如果不分开，需要讨论下。
+
+## 7.5 gfs有时会出现重复记录或者padding记录，为什么？
+
+**padding出现场景：**
+
+- last chunk的剩余空间不满足当前写入量大小，需要把last chunk做padding，然后告诉客户端写入下一个chunk
+- append操作失败的时候，需要把之前写入失败的副本padding对齐到master
+
+**重复记录出现场景：**
+
+- append操作部分副本成功，部分失败，然后告诉客户端重试，客户端会在成功的副本上再次append，这样就会有重复记录出现
+
+## 7.6 lease是什么？在gfs中起到了什么作用？它与心跳有何区别？
+
+lease是gfs master把控制写入顺序的权限下放给chunkserver的机制，以减少gfs master在读写流程中的参与度，防止其成为系统瓶颈。心跳是gfs master检测chunkserver是否可用的标志。
+
+## 7.7 gfs追加过程中如果出现备副本故障，如何处理？如果出现主副本故障，应该如何处理？
+
+- 对于备副本故障，写入的时候会失败，然后primary会返回错误给client。按照一般的系统设计，client会重试一定次数，发现还是失败，这时候client会把情况告诉给gfs master，gfs master可以检测chunkserver的情况，然后把最新的chunkserver信息同步给client，client端再继续重试。
+
+
+- 对于主副本故障，写入的时候会失败，client端应该是超时了。client端会继续重试一定次数，发现还是一直超时，那么把情况告诉给gfs master，gfs master发现primary挂掉，会重新grant lease到其他chunkserver，并把情况返回给client。
+
+## 7.8 gfs master需要存储哪些信息？master的数据结构如何设计？
+
+namespace、文件到chunk的映射以及chunk的位置信息
+
+namespace采用的是B-Tree，对于名称采用前缀压缩的方法，节省空间；（文件名，chunk index）到chunk的映射，可以通过hashmap；chunk到chunk的位置信息，可以用multi_hashmap，因为是一对多的映射。
+
+## 7.9 假设服务一千万个文件，每个文件1GB，master中存储元数据大概占多少内存？
+
+1GB/64MB = 1024 / 64 = 16。总共需要16 * 10000000 * 64 B = 10GB
+
+## 7.10 master如何实现高可用性？
+
+- metadata中namespace，以及文件到chunk信息持久化，并存储到多台机器
+- 对metadata的做checkpoint，保证重启后replay消耗时间比较短，checkpoint可以直接映射到内存使用，不用解析
+- 在primary master发生故障的时候，并且无法重启时，会有外部监控将secondary master，并提供读服务。secondary master也会监控chunkserver的状态，然后把primary master的日志replay到内存中
+
+## 7.11 负载的影响因素有哪些？如何计算一台机器的负载值？
+
+讨论
+
+## 7.12 master新建chunk时如何选择chunkserver？如果新机器上线，负载值特别低，如何避免其他chunkserver同时往这台机器上迁移chunk？
+
+**如何选择chunkserver**
+
+- 磁盘空间使用率低于平均值的chunkserver
+- 限制每台chunkserver最近创建chunk的次数，因为创建chunk往往意味着后续需要写入大量数据，所以，应该把写流量均摊到每台chunkserver
+- chunk的副本放置于不同机架的chunkserver上
+
+**如何避免同时迁移**
+
+通过限制单个chunkserver的clone操作的个数，以及clone使用的带宽来限制，即从源chunkserver度数据的频率做控制。
+
+## 7.13 如果chunkserver下线后过一会重新上线，gfs如何处理？
+
+因为是过一会，所以假设chunk re-replication还没有执行，那么在这期间，可能这台chunkserver上有些chunk的数据已经处于落后状态了，client读数据的时候或者chunkserver定期扫描的时候会把这些状态告诉给master，master告诉上线后的chunkserver从其他机器复制该chunk，然后master会把这个chunk当作是垃圾清理掉。
+
+对于没有落后的chunk副本，可以直接用于使用。
+
+## 7.14 如何实现分布式文件系统的快照操作？
+
+Snapshot的整个流程如下：
+
+1. client向GFS master发送Snapshot请求
+2. GFS master收到请求后，会回收所有这次Snapshot涉及到的chunk的lease
+3. 当所有回收的lease到期后，GFS master写入一条日志，记录这个信息。然后，GFS会在内存中复制一份snapshot涉及到的metadata
+
+当snapshot操作完成后，client写snapshot中涉及到的chunk C的流程如下：
+
+1. client向GFS master请求primary chunkserver和其他chunkserver
+2. GFS master发现chunk C的引用计数超过1，即snapshot和本身。它会向所有有chunk C副本的chunkserver发送创建一个chunk C的拷贝请求，记作是chunk C'，这样，把最新数据写入到chunk C'即可。本质上是copy on write。
+
+## 7.15 chunkserver数据结构如何设计？
+
+chunkserver主要是存储64KB block的checksum信息，需要由chunk+offset，能够快速定位到checksum，可以用hashmap。
+
+## 7.16 磁盘可能出现位翻转错误，chunkserver如何应对？
+
+利用checksum机制，分读和写两种情况来讨论：
+
+1. 对于读，要检查所读的所有block的checksum值
+2. 对于写，分为append和write。对于append，不检查checksum，延迟到读的时候检查，因为append的时候，对于最后一个不完整的block计算checksum时候采用的是增量的计算，即使前面存在错误，也能在后来的读发现。对于overwrite，因为不能采用增量计算，要覆盖checksum，所以，必须要先检查只写入部分数据的checksum是否不一致，否则，数据错误会被隐藏。
+
+## 7.17 chunkserver重启后可能有一些过期的chunk，master如何能够发现？
+
+chunkserver重启后，会汇报chunk及其version number，master根据version number来判断是否过期。如果过期了，那么会做以下操作：
+
+1. 过期的chunk不参与数据读写流程
+2. master会告诉chunkserver从其他的最新副本里拷贝一份数据
+3. master将过期的chunk假如garbage collection中
+
+问题：如果chunkserver拷贝数据的过程过程中，之前拷贝的数据备份又发生了变化，然后分为两种情况讨论：
+
+1. 如果期间lease没变，那么chunkserver不知道自己拷贝的数据是老的，应该会存在不一致的问题？
+2. 如果期间lease改变，那么chunkserver因为还不能提供读服务，那么version number应该不会递增，继续保持stable状态，然后再发起拷贝。
