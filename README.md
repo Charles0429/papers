@@ -3,8 +3,8 @@
 
 # Papers
 
-- google file system (doing)
-- bigtable
+- google file system ([学习笔记](doc/gfs.md))
+- bigtable([学习笔记](doc/bigtable.md))
 - mapreduce
 - chubby
 - spanner
