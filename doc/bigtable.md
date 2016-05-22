@@ -214,3 +214,57 @@ minor compaction的目标主要有
 
 major compaction将所有的SSTable合并成一个SSTable。major和非major的区别在于，major compaction后的SSTable不包含任何的已经删除的数据，而非major compaction有可能会包含。
 
+# 6. Refinements
+
+本部分讨论一些提升系统性能、可用性和可靠性的方法和技术。
+
+## 6.1 Locality groups
+
+client可以指定多个column family到一个locality group，每个locality group会单独指定一个SSTable，这样读单个locality group的数据会更高效。例如，在`WebTable`中page meta放到一个locality group，而`content`可以放到另一个locality group。这样读page meta的时候，就不需要去读page content信息了。备注：可能的坏处时，如果需要读多个locality group的数据的时候，这样就会比较低效，需要应用控制好locality group的划分，适合业务特征。
+
+另外，locality group中的SSTable可以配置放到内存中，采用延迟加载的方法，一旦放入内存后，下次读SSTable的时候就可以从内存中查找数据了。例如，metadata table的数据被配置成这种方式。
+
+## 6.2 Compression  
+
+按照locality group来进行压缩，client可以配置具体的压缩算法。具体地压缩的时候，对每个SSTable的block来进行压缩的，这样的好处是，读SSTable的数据的时候，不需要解压整个文件。在google应用中，需要client采用两级压缩的方法，先采用`Bentley and McIlroy`方法压缩长公共字符串，接着采用一个快速压缩算法，按照16KB为块来进行压缩。在`WebTable`中把同一个host的内容放在一起，可以提升压缩比例，并且，row key的取名也比较重要。
+
+## 6.3 Caching for read performance
+
+采用两级cache，其中**Scan Cache**用来存储访问过的K/V对，对重复读某些数据的性能的应用比较友好；**Block Cache**缓存从GFS中读取的SSTable block，对读附近的数据的应用比较友好。
+
+## 6.4 Bloom filters
+
+在bigtable中，经常需要从多个SSTable中合并出数据，返回给client。如果SSTable不在内存中，将会有比较多的磁盘I/O。Bloom filter可以帮助过滤掉大部分那些SSTable中没有某行数据的，以减少访问SSTable的次数。
+
+## 6.5 Commit-log implementation
+
+commit log可以有两种实现方式，第一种是每个tablet一个log文件，第二种是一个tablet server一个log文件。
+
+如果采用第一种方式实现，每个写操作都要去写对应的文件，需要大量的disk seek去写到不同的物理文件中。并且，对于group commit的优化会减弱，只有同一个tablet的才会形成一个group。
+
+采用第二种方式实现会改善上面两种操作的效率，但是对于tablet recovery不友好。当一个tablet server宕机后，其上的tablet会被多个不同的其他tablet server加载上。这些tablet server只需要该tablet server的某些tablet的commit log，而不是需要所有的，解决方案是，先把commit log按照<table, row nmae, log sequence number>排序，然后，每个tablet server读取其对应需要commit log。为了优化排序性能，采用多路排序的方法，master把日志文件分成多个64MB的文件，放到不同的tablet server排序。
+
+写日志的时候，有可能会碰到GFS的写操作延迟比较大，例如碰到要写入的副本宕机等情况，bigtable采用的解决方案是，用两个线程来写日志，每个写入自己的文件。同一时刻，只有一个线程在工作，如果当前线程的写入性能比较差，那么切换到另一个进程。
+
+问题：最终的commit log应该是两个线程写入的文件内容去重后合并的结果？
+
+## 6.6 Speeding up tablet recovery
+
+把一个tablet从某个tablet server A迁移到另一个tablet server B的流程
+
+1. A上对该tablet做一次minor compaction，以减少replay log的时间
+2. A对该tablet停止服务，需要再做一次minor compaction，因为从上次做minor compaction到停止服务期间可能有新的写入操作
+3. 在B上一次加载这两次minor compaction的内容到内存中
+
+问题：中间停止服务的时间应该是从步骤二开始到步骤三结束，大约时间需要多少？
+
+## 6.7 Exploiting immutability
+
+对于SSTable，由于SSTable是不可修改的，因此，对于SSTable文件的访问可以并行，无需要进行同步。对于分裂操作，也可以让分裂后的tablet共享原来的SSTable。
+
+对于memtable，采用的是copy on write机制，保证读和写可以并行。即先拷贝一份数据出来，修改后，再写入到memtable中。
+
+对于已删除的数据，是放到SSTable文件的清理来做的，master采用`mark-and-sweep`机制来清理。
+
+
+
