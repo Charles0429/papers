@@ -15,6 +15,7 @@
 - percolator
 - Sinfonia: A New Paradigm for Building Scalable Distributed Systems
 - google f1
+- google borg
 - Windows Azure Storage: A high available cloud storage service with strong consistency
 - facebook haystack
 
