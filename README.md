@@ -3,6 +3,8 @@
 
 # Papers
 
+## System
+
 - google file system ([学习笔记](doc/gfs.md))
 - bigtable([学习笔记](doc/bigtable.md))
 - mapreduce
@@ -18,4 +20,6 @@
 - google borg
 - Windows Azure Storage: A high available cloud storage service with strong consistency
 - facebook haystack
+
+## Protocol or Algorithm
 
