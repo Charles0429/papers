@@ -150,6 +150,8 @@ master周期性和tablet server通信来询问其锁的状态，如果是
 - master多次重试无法和tablet server通信，接着master尝试和chubby通信，获取该server的文件所，根据结果分为两种情况：第一是master可以获得锁，那么说明tablet server挂掉或者其与Chubby无法通信，那么，master可以确信它无法提供服务了，因此立即删除Chubby上的文件，然后，把这台tablet server上的tablet都设置成未分配状态；第二是master无法获得锁，说明master和Chubby通信有问题，master会停止进程。
 
 问题：master重新分配tablet的时机是？
+问题：为什么master不直接和tablet server维持租约？
+问题：为什么master不直接看chubby上的锁状态来确定tablet server的状态？有可能tablet server和chubby可以连接，但master和tablet server连不上。
 
 master启动时，需要先检测当前的tablet分配情况，然后才能改变分配情况，启动步骤如下
 
