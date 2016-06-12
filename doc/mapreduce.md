@@ -1,4 +1,4 @@
-# Introduction
+# 1. Introduction
 
 本文是读MapReduce论文的总结。
 
@@ -119,3 +119,83 @@ Map会自动地把输入数据划分成M份，这些数据划分可以并行地�
 7. 当所有的map和reduce任务都完成时，master会唤醒用户程序，然后返回到用户程序空间执行用户代码。
 
 成功执行后，输出结果在R个文件中，通常，用户不需要合并这R个文件，因为，可以把它们作为新的MapReduce处理逻辑的输入数据，或者其它分布式应用的输入数据。
+
+## 3.2 Master Data Structure
+
+master维护了以下信息
+
+- 对每个map和reduce任务，记录了任务状态，包括idle,in-progress或completed，并且对于非idle状态的任务还记录了worker机器的信息
+- 记录了map任务生成R个部分的文件位置信息
+
+## 3.3 Fault Tolerance
+
+分为两块，worker fault tolerance和master fault tolerance
+
+**Worker Failure**
+
+master采用ping的方式检测故障，如果一台worker机器在一定时间内没有响应，则认为这台机器故障。
+
+- 对于map任务机器故障，完成了的map任务也需要完全重新执行，因为元算结果是存储在map任务所在机器的本地磁盘上的
+
+当一个map任务开始由A来执行，而后挂掉后由B来执行，所有的为接收改任务数据的reduce任务的机器都会收到新的通知。
+
+- 对于完成了的reduce任务则不需要重新执行，因为结果已经输出到GFS中
+
+**Master Failure**
+
+可以通过定期的checkpoint来保存状态，master挂掉后，可以回到最近checkpoint所在的状态。
+
+但google没有采用这种方案，因为任务master挂掉概率极小，只需要让应用重试这次操作。
+
+**Semantics in the Presence of Failure**
+
+当用户提供的Map和Reduce函数的执行结果是确定的，那么最终的执行结果就是确定的。
+
+当用户提供的执行结果不是确定的，那么最终结果也是不确定的，但是每个reduce任务产生的结果都是不确定的某次串行执行的结果。
+
+## 3.4 Locality
+
+由于输入数据是存储在GFS上的，所以，MapReduce为了减少网络通信，采取了以下优化策略
+
+1. 因为GFS是按照64MB的chunk来存储数据的，这样可以把worker按照这个信息调度，尽量是每个worker都起到相应的GFS副本上，这样输入基本上是走本地磁盘
+2. 如果上面的条件无法满足，那么尽量找一台和GFS副本机器在同一个交换机的机器
+
+## 3.5 Task Granularity
+
+MapReduce将map任务分成M份，reduce任务分成R份，理想状态M和R的值应该比worker机器大很多，这样有助于负载均衡以及故障恢复。因为当一台机器挂掉后，它的map任务可以分配给很多其他的机器执行。
+
+实际应用中，因为master需要O(M+R)的空间来做调度决策，需要存储O(M*R)的任务产生的结果位置信息，对于每个任务产生的结果位置信息大约每个任务需要一个字节。
+
+通常R的数量是由用户执行的，实际应用中对M的划分是要保证一个分片的数据量大小大约是16-64M，R的期望值是一个比较小的数。典型的M和R的值为 M = 200000，R = 5000，使用2000台worker机器。
+
+## 3.6 Backup Tasks
+
+通常，在执行过程中，会有少数几台机器的执行特别慢，可能是由于磁盘故障等原因引起的，这些机器会大大地增加任务的执行时间，MapReduce采用的方案是
+
+- 当一个MapReduce操作快执行完成的时候，master会生成正在进行的任务的备份任务。只要其中一个任务执行完成，就认为该任务执行完成。
+
+该机制在占有很少的计算资源的情况下，大大缩短了任务的执行时间。
+
+# 4. Refinements
+
+本节描述了一些提升效率的策略。
+
+## 4.1 Partitioning Function
+
+map任务的中间结果按照partitioning function分成了R个部分，通常，默认的函数`hash(key) mod R`可以提供相对均衡的划分。但有时应用需要按照自己的需求的来划分，比如，当Key是URL时，用户可能希望相同host的URL划分到一起，方便处理。这时候，用户可以自己提供partitioning function，例如`hash(Hostname(url))`。
+
+## 4.2 Ordering Guarantees
+
+对于reduce任务生成的结果，MapReduce保证其是按照Key排序的，方便reduce worker聚合结果，并且还有两个好处
+
+- 按照key随机读性能较好
+- 用户程序需要排序时会比较方便
+
+## 4.3 Combiner Function
+
+在有些情况下，map任务生成的中间结果中key的重复度很高，会造成对应的reduce任务通信量比较大。例如，word count程序中，可能和the相关的单词量特别大，组成了很多的(the, 1)K/V对，这些都会推送到某个reduce任务，会造成该reduce任务通信量和计算量高于其他的reduce任务。解决的方法是
+
+- 在map任务将数据发送到网络前，通过提供一个`combiner`函数，先把数据做聚合，以减少数据在网络上的传输量
+
+
+
