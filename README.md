@@ -7,7 +7,7 @@
 
 - google file system ([学习笔记](doc/gfs.md))
 - bigtable([学习笔记](doc/bigtable.md))
-- mapreduce
+- mapreduce([学习笔记](doc/mapreduce.md))
 - chubby([学习笔记](doc/chubby.md))
 - spanner
 - dynamo
