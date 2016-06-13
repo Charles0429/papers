@@ -2,12 +2,12 @@
 
 本文是读MapReduce论文的总结。
 
-Google发现有一些应用的计算模型比较简单，但涉及到大量数据，需要成百上千的机器来处理。如何并行化计算、分布数据和处理故障需要复杂的处理，MapReduce的出现即为了解决这个问题。通过提供的编程库，用户能轻松的写出处理逻辑，而内部的并行化计算、数据分布等问题由MapReduce来处理，大大简化了用户的编程逻辑。
+Google发现有一些应用的计算模型比较简单，但涉及到大量数据，需要成百上千的机器来处理。如何并行化计算、分布数据和处理故障需要复杂的处理呢？MapReduce的出现即为了解决这个问题。通过提供的编程库，用户能轻松地写出处理逻辑，而内部的并行化计算、数据分布等问题由MapReduce来处理，大大简化了用户的编程逻辑。
 
 MapReduce受到lisp等函数式编程语言的启发，发现大部分的计算任务包括两个处理流程：
 
 - map操作：对每条逻辑记录计算Key/Value对
-- reduce操作：对Key/Value按照相同k系统ey进行聚合
+- reduce操作：对Key/Value按照Key进行聚合
 
 接下来，按照如下结构分析MapReduce系统
 
@@ -19,7 +19,7 @@ MapReduce受到lisp等函数式编程语言的启发，发现大部分的计算�
 
 MapReduce的计算以一组Key/Value对为输入，然后输出一组Key/Value对，用户通过编写Map和Reduce函数来控制处理逻辑。
 
-Map函数把输入转换成一组中间的Key/Value对，MapReduce library会把所有相同的Key的中间结果聚合，然后传递给Reduce函数处理。
+Map函数把输入转换成一组中间的Key/Value对，MapReduce library会把所有Key的中间结果传递给Reduce函数处理。
 
 Reduce函数接收Key和其对应的一组Value，它的作用就是聚合这些Value，产生最终的结果。Reduce的输入是以迭代器的方式输入，使得MapReduce可以处理数据量比内存大的情况。
 
@@ -94,7 +94,7 @@ Term Vector指的是一篇文档中的(word, frequency)K/V对。
 
 # 3. Implementation
 
-根据不同的环境，MapReduce的实现可以多种多样，例如，基于共享内存的，基于NUMA多核环境的以及基于多台机器组成的集群环境的。
+根据不同的环境，MapReduce的实现可以多种多样，例如，基于共享内存的，基于NUMA多核环境的，以及基于多台机器组成的集群环境的。
 
 Google的环境如下
 
@@ -135,7 +135,7 @@ master维护了以下信息
 
 master采用ping的方式检测故障，如果一台worker机器在一定时间内没有响应，则认为这台机器故障。
 
-- 对于map任务机器故障，完成了的map任务也需要完全重新执行，因为元算结果是存储在map任务所在机器的本地磁盘上的
+- 对于map任务机器故障，完成了的map任务也需要完全重新执行，因为计算结果是存储在map任务所在机器的本地磁盘上的
 
 当一个map任务开始由A来执行，而后挂掉后由B来执行，所有的为接收改任务数据的reduce任务的机器都会收到新的通知。
 
@@ -172,7 +172,7 @@ MapReduce将map任务分成M份，reduce任务分成R份，理想状态M和R的�
 
 通常，在执行过程中，会有少数几台机器的执行特别慢，可能是由于磁盘故障等原因引起的，这些机器会大大地增加任务的执行时间，MapReduce采用的方案是
 
-- 当一个MapReduce操作快执行完成的时候，master会生成正在进行的任务的备份任务。只要其中一个任务执行完成，就认为该任务执行完成。
+- 当一个MapReduce操作快执行完成的时候，master会生成正在进行的任务的备份任务。备份任务和源任务做的是同样的事情，只要其中一个任务执行完成，就认为该任务执行完成。
 
 该机制在占有很少的计算资源的情况下，大大缩短了任务的执行时间。
 
@@ -198,4 +198,49 @@ map任务的中间结果按照partitioning function分成了R个部分，通常�
 - 在map任务将数据发送到网络前，通过提供一个`combiner`函数，先把数据做聚合，以减少数据在网络上的传输量
 
 
+## 4.4 Input and Output Types
 
+MapReduce提供多种读写格式的支持，例如，文件中的偏移和行内容组成K/V对。
+
+用户也可以自定义读写格式的解析，实现对应的接口即可。
+
+## 4.5 Side-effects
+
+MapReduce允许用户程序生成辅助的输出文件，其原子性依赖于应用的实现。
+
+## 4.6 Skipping Bad Records
+
+有时候，可能用户程序有bug，导致任务在解析某些记录的时候会崩溃。普通的做法是修复用户程序的bug，但有时候，bug是来自第三方的库，无法修改源码。
+
+MapReduce的做法是通过监控任务进程的segementation violation和bus error信号，一旦发生，把响应的记录发送到master，如果master发现某条记录失败次数大于1，它就会在下次执行的时候跳过该条记录。
+
+## 4.7 Local Execution
+
+因为Map和Reduce任务是在分布式环境下执行的，要调试它们是非常困难的。MapReduce提供在本机串行化执行MapReduce的接口，方便用户调试。
+
+## 4.8 Status Information
+
+master把内部的状态通过网页的方式展示出来，例如，计算的进度，包括，多少任务完成了，多少正在执行，输入的字节数，输出的中间结果，最终输出的字节数等；网页还包括每个任务的错误输出和标准输出，用户可以通过这些来判断计算需要的时间等；除此之外，还有worker失败的信息，方便排查问题。
+
+## 4.9 Counters
+
+MapReduce libaray提供一个counter接口来记录各种事件发生的次数。
+
+例如，word count用户想知道总共处理了多少大写单词，可以按照如下方式统计
+
+```
+Counter* uppercase;
+uppercase = GetCounter("uppercase");
+
+map(String name, String contents):
+	for each word w in contents:
+		if (IsCapitalized(w)):
+			uppercase->Increment();
+		EmitIntermediate(w, "1");
+```
+
+master通过ping-pong消息来拉取worker的count信息，当MapReduce操作完成时，count值会返回给用户程序，需要注意的是，重复执行的任务的count只会统计一次。
+
+有些counter是MapReduce libaray内部自动维护的，例如，输入的K/V对数量，输出的K/V对数量等。
+
+Counter机制在有些情况很有用，比如用户希望输入和输出的K/V数量是完全相同的，就可以通过Counter机制来检查。
