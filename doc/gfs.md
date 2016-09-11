@@ -1,6 +1,8 @@
 # 1. Introduction
 
-本文为读GFS论文所做的总结，主要分为以下几方面：
+本文是读GFS论文的总结，收录在我的github中[papers项目](https://github.com/Charles0429/papers)，papers项目旨在学习和总结分布式系统相关的论文。
+
+全文主要分为以下几方面：
 
 - Design Motivation
 - Architecture
@@ -13,7 +15,7 @@
 
 google对现有系统的运行状态以及应用系统进行总结，抽象出对文件系统的需求，主要分为以下几个方面。
 
-- 普通商用的机器硬件发生故障是件很平常的事情，概率不低
+- 普通商用的机器硬件发生故障是常态
 - 存储的问题普遍比较大，几个G的文件很常见
 - 大部分的文件操作都是在追加数据，覆盖原来写入的数据的情况比较少见，随机写几乎不存在
 - 读操作主要包括两种，large streaming read和small random read
@@ -41,7 +43,7 @@ GFS中有四类角色，分别是
 
 ###3.1.1 GFS chunkserver
 
-在GFS chunkserver中，文件都是分成固定大小的chunk来存储的，每个chunk通过全局唯一的64位的chunk handle来标识，chunk handle在chunk创建的时候由GFS master分配。GFS chunkserver把文件存储在本地磁盘中，读或写的时候需要制定文件名和字节范围，然后定位到对应的chunk。为了保证数据的可靠性，一个chunk一般会在多台GFS chunkserver上存储，默认为3份，但用户也可以根据自己的需要修改这个值。
+在GFS chunkserver中，文件都是分成固定大小的chunk来存储的，每个chunk通过全局唯一的64位的chunk handle来标识，chunk handle在chunk创建的时候由GFS master分配。GFS chunkserver把文件存储在本地磁盘中，读或写的时候需要指定文件名和字节范围，然后定位到对应的chunk。为了保证数据的可靠性，一个chunk一般会在多台GFS chunkserver上存储，默认为3份，但用户也可以根据自己的需要修改这个值。
 
 ### 3.1.2 GFS master
 
@@ -95,7 +97,7 @@ GFS master存储三种metadata，包括文件和chunk namespace，文件到chunk
 
 GFS master不持久化存储chunk位置信息的原因是，GFS chunkserver很容易出现宕机，重启等行为，这样GFS master在每次发生这些事件的时候，都要修改持久化存储里面的位置信息的数据。
 
-### 3.4.3 operation log
+### 3.4.3 Operation Log
 
 **operation log的作用**
 
@@ -152,14 +154,14 @@ Lease的过期时间默认是60s，可以通过心跳信息来续时间，如果
 
 ## 4.3 Atomic Record Appends
 
-Append操作流程和写差不多，主要区别在一下方面
+Append操作流程和写差不多，主要区别在以下
 
 - client把数据推送到所有副本的最后一个chunk，然后发送写请求到primary
-- primary首先检查最后一个chunk的剩余空间是否可以满足当前写请求，如果可以，那么执行写流程，否则，它会把当前的chunk的剩余空间pad起来，然后告诉其他的副本也这么干，然后告诉client这个chunk满了，写入下个chunk。
+- primary首先检查最后一个chunk的剩余空间是否可以满足当前写请求，如果可以，那么执行写流程，否则，它会把当前的chunk的剩余空间pad起来，然后告诉其他的副本也这么干，最后告诉client这个chunk满了，写入下个chunk。
 
 这里需要讨论的是，如果append操作在部分副本失败的情况下，会发生什么？
 
-例如，写操作要追加到S1-S3，但是，仅仅是S1,S2成功了，S3失败了，GFS client会重试操作，假如第二次成功了，那么S1,S2写了两次，S3写了一次，目前，暂时认为GFS会先把失败的记录进行padding对齐到primary的记录，然后再继续append。
+例如，写操作要追加到S1-S3，但是，仅仅是S1,S2成功了，S3失败了，GFS client会重试操作，假如第二次成功了，那么S1,S2写了两次，S3写了一次，目前的理解是GFS会先把失败的记录进行padding对齐到primary的记录，然后再继续append。
 
 ## 4.4 Snapshot
 
@@ -282,10 +284,9 @@ chunk复制的时候，选择新chunkserver要考虑的点：
 
 GFS master会把落后的chunk当垃圾来清理掉，并且不会把落后的chunkserver的位置信息传给client。
 
-这里有两个疑问：
+备注：
 
-1. master分配的lease的有效期是60s，如果在lease期间，chunkserver挂掉了，那么这个时候chunkserver的version number是最新的，但是lease期间的部分数据没有更新到该chunkserver，论文中没有讨论这种情况如何处理？写入操作可能是失败了，但是version number是最新的，这样它重启的时候就无法区分是不是stale replication？
-2. GFS master把落后的chunk当作垃圾清理，那么，是否是走re-replication的逻辑来生成新的副本呢？没有，是走立即复制的逻辑。
+１. GFS master把落后的chunk当作垃圾清理，那么，是否是走re-replication的逻辑来生成新的副本呢？没有，是走立即复制的逻辑。
 
 #6. Fault Tolerance and Diagnose
 
@@ -393,7 +394,7 @@ namespace采用的是B-Tree，对于名称采用前缀压缩的方法，节省�
 
 ## 7.11 负载的影响因素有哪些？如何计算一台机器的负载值？
 
-讨论
+主要是考虑CPU、内存、网络和I/O，但如何综合这些参数并计算还是得看具体的场景，每部分的权重随场景的不同而不同。
 
 ## 7.12 master新建chunk时如何选择chunkserver？如果新机器上线，负载值特别低，如何避免其他chunkserver同时往这台机器上迁移chunk？
 
