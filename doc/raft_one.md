@@ -1,4 +1,4 @@
-ntroduction
+# Introduction
 
 本文收录在[paper](https://github.com/Charles0429/papers)项目中，papers项目旨在学习和总结分布式系统相关的论文；同时本文也是[DSTORE](https://github.com/Charles0429/dstore)项目的必备知识，DSTORE的目标是自己动手实现一个分布式KV存储引擎。
 
