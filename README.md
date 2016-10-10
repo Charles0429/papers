@@ -23,4 +23,4 @@
 
 ## Protocol or Algorithm
 
-- raft ([学习笔记一](doc/raft_one.md))
+- raft ([学习笔记一](doc/raft_one.md) [学习笔记二](doc/raft_two.md))
