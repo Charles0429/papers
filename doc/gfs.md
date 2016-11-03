@@ -55,7 +55,7 @@ GFS client是GFS应用端使用的API接口，client和GFS master交互来获取
 
 ### 3.1.4 Application
 
-Application为使用gfs的应用，应用通过GFS client于gfs后端(GFS master和GFS chunkserver)打交道。
+Application为使用gfs的应用，应用通过GFS client与gfs后端(GFS master和GFS chunkserver)打交道。
 
 ## 3.2 Single Master
 
