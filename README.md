@@ -26,3 +26,5 @@
 - Raft ([学习笔记一](doc/raft_one.md) | [学习笔记二](doc/raft_two.md) | [学习笔记三](doc/raft_three.md))
 - Paxos
 - Consistent Hash
+- Generalized Isolation Level Definitions
+- CAP
