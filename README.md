@@ -26,5 +26,5 @@
 - Raft ([学习笔记一](doc/raft_one.md) | [学习笔记二](doc/raft_two.md) | [学习笔记三](doc/raft_three.md))
 - Paxos ([Basic Paxos](doc/paxos-principle-first.md))
 - Consistent Hash
-- Generalized Isolation Level Definitions
+- A Critique of ANSI SQL Isolation Levels
 - CAP
