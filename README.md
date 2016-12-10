@@ -20,6 +20,7 @@
 - google borg
 - Windows Azure Storage: A high available cloud storage service with strong consistency
 - facebook haystack
+- What's Really New in NewSQL? [学习笔记](doc/newsql.md)
 
 ## Protocol or Algorithm
 
