@@ -444,7 +444,7 @@ chunkserver重启后，会汇报chunk及其version number，master根据version 
 
 1. 过期的chunk不参与数据读写流程
 2. master会告诉chunkserver从其他的最新副本里拷贝一份数据
-3. master将过期的chunk假如garbage collection中
+3. master将过期的chunk加入garbage collection中
 
 问题：如果chunkserver拷贝数据的过程过程中，之前拷贝的数据备份又发生了变化，然后分为两种情况讨论：
 
