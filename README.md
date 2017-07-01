@@ -22,7 +22,7 @@
 - facebook haystack
 - What's Really New in NewSQL? ([学习笔记](doc/newsql.md))
 
-## DataBase
+## Database
 
 ## Distrubuted Machine Learning System
 
